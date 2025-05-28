@@ -580,7 +580,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: HGAConfigEntry) -> bool:
         }
     )
     # NOTE: must call .setup() the first time store is used.
-    #await store.setup()  # noqa: ERA001
+    await store.setup()  # noqa: ERA001
     entry.store = store
 
     # Initialize video analyzer and start if option is set.

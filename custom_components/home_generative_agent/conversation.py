@@ -145,8 +145,6 @@ class HGAConversationEntity(
 
         # Database for thread-based (short-term) memory.
         self.checkpointer = AsyncPostgresSaver(self.entry.pool)
-        # NOTE: must call .setup() the first time checkpointer is used.
-        #await checkpointer.setup()  # noqa: ERA001
 
     async def async_added_to_hass(self) -> None:
         """When entity is added to Home Assistant."""
@@ -154,6 +152,9 @@ class HGAConversationEntity(
         assist_pipeline.async_migrate_engine(
             self.hass, "conversation", self.entry.entry_id, self.entity_id
         )
+        # NOTE: must call .setup() the first time checkpointer is used.
+        # This is an async call and needs to be awaited.
+        await self.checkpointer.setup()
         conversation.async_set_agent(self.hass, self.entry, self)
         self.entry.async_on_unload(
             self.entry.add_update_listener(self._async_entry_update_listener)

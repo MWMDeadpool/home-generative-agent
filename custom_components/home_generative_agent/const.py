@@ -15,7 +15,7 @@ RECOMMENDED_CHAT_MODEL_LOCATION: Literal["cloud", "edge"] = "edge"
 ### OpenAI chat model parameters.
 # See https://platform.openai.com/docs/api-reference/chat/create.
 CONF_CHAT_MODEL = "chat_model"
-RECOMMENDED_CHAT_MODEL = "gpt-4o"
+RECOMMENDED_CHAT_MODEL = "gpt-4.1-mini"
 CONF_CHAT_MODEL_TEMPERATURE = "chat_model_temperature"
 RECOMMENDED_CHAT_MODEL_TEMPERATURE = 1.0
 ### Ollama edge chat model parameters. ###
@@ -94,7 +94,7 @@ Call the tool again with your mistake corrected.
 
 ### Ollama edge chat model parameters. ###
 # Edge chat model server URL.
-EDGE_CHAT_MODEL_URL = "192.168.1.252:11434"
+EDGE_CHAT_MODEL_URL = "192.168.10.2:11434"
 # Reasoning delimiters for models that use them in output.
 # These may be model dependent, the defaults work for qwen3.
 EDGE_CHAT_MODEL_REASONING_DELIMITER: dict[str, str] = {
@@ -103,7 +103,7 @@ EDGE_CHAT_MODEL_REASONING_DELIMITER: dict[str, str] = {
 
 ### Ollama VLM parameters. ###
 # Ollama VLM server URL.
-VLM_URL = "192.168.1.252:11434"
+VLM_URL = "192.168.10.2:11434"
 # Ollama VLM maximum number of output tokens to generate.
 VLM_NUM_PREDICT = 4096
 # Sets the size of the context window used to generate the next token.
@@ -143,7 +143,7 @@ Update the summary by taking into account the additional smart home messages abo
 """
 
 ### Ollama embedding model parameters. ###
-EMBEDDING_MODEL_URL = "192.168.1.252:11434"
+EMBEDDING_MODEL_URL = "192.168.10.2:11434"
 EMBEDDING_MODEL_DIMS = 1024
 EMBEDDING_MODEL_CTX = 512
 EMBEDDING_MODEL_PROMPT_TEMPLATE = """
@@ -158,9 +158,9 @@ AUTOMATION_TOOL_BLUEPRINT_NAME = "goruck/hga_scene_analysis.yaml"
 
 ### Camera video analyzer. ###
 # Interval units are seconds.
-VIDEO_ANALYZER_SCAN_INTERVAL = 1
+VIDEO_ANALYZER_SCAN_INTERVAL = 3600
 # Root must be in allowlist_external_dirs.
-VIDEO_ANALYZER_SNAPSHOT_ROOT = "/home/lindo/core/config/media/snapshots"
+VIDEO_ANALYZER_SNAPSHOT_ROOT = "/media/snapshots"
 VIDEO_ANALYZER_SYSTEM_MESSAGE = """
 You are a bot that generates a description of a video given descriptions of its frames.
 Keep the description to the point and use no more than 250 characters.
@@ -168,7 +168,7 @@ Keep the description to the point and use no more than 250 characters.
 VIDEO_ANALYZER_PROMPT = """
 Describe what is happening in this video from these frame descriptions:
 """
-VIDEO_ANALYZER_MOBILE_APP = "mobile_app_lindos_iphone"
+VIDEO_ANALYZER_MOBILE_APP = "mobile_app_darians_phone"
 # Time offset units are minutes.
 VIDEO_ANALYZER_TIME_OFFSET = 15
 VIDEO_ANALYZER_SIMILARITY_THRESHOLD = 0.8
@@ -177,4 +177,4 @@ VIDEO_ANALYZER_TRIGGER_ON_MOTION = True
 VIDEO_ANALYZER_MOTION_CAMERA_MAP: dict = {}
 
 ### postgresql db parameters for checkpointer and memory persistent storage. ###
-DB_URI = "postgresql://hga:hga@localhost:5432/hga?sslmode=disable"
+DB_URI = "postgresql://hga:hga@192.168.10.2:5437/hga?sslmode=disable"
