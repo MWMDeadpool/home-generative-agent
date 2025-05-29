@@ -64,6 +64,7 @@ async def _call_model(
     prompt = config["configurable"]["prompt"]
     user_id = config["configurable"]["user_id"]
     hass = config["configurable"]["hass"]
+    current_model_id = model.model_name
 
     # Retrieve most recent or search for most relevant memories for context.
     # Use semantic search if the last message was from the user.
@@ -123,22 +124,45 @@ async def _call_model(
     # tool schemas and under counts message tokens for the qwen models.
     # Until this is fixed, 'max_tokens' should be set to a value less than
     # the maximum size of the model's context window. See const.py.
-    num_tokens = await hass.async_add_executor_job(
-        model.get_num_tokens_from_messages, messages
-    )
-    LOGGER.debug("Token count in messages from token counter: %s", num_tokens)
-    if CONTEXT_MANAGE_USE_TOKENS:
-        max_tokens = CONTEXT_MAX_TOKENS
-        token_counter = config["configurable"]["chat_model"]
+
+    models_to_skip_token_counting = ["gpt-4.1-mini", "gpt-4.1"]
+    skip_token_counting_for_model = current_model_id in models_to_skip_token_counting
+
+    if skip_token_counting_for_model:
+        LOGGER.debug(
+            "Skipping explicit token counting for model %s as it is in the skip list.",
+            current_model_id,
+        )
+        # num_tokens was only used for logging, can be set to None or 0
+        # num_tokens = None
     else:
-        max_tokens = CONTEXT_MAX_MESSAGES
-        token_counter = len
+        num_tokens = await hass.async_add_executor_job(
+            model.get_num_tokens_from_messages, messages
+        )
+        LOGGER.debug("Token count in messages from token counter: %s", num_tokens)
+
+    if CONTEXT_MANAGE_USE_TOKENS:
+        if skip_token_counting_for_model:
+            LOGGER.debug(
+                "Model %s is in skip list for token counting. "
+                "Using message count for trimming context.",
+                current_model_id,
+            )
+            max_tokens_for_trimming = CONTEXT_MAX_MESSAGES
+            token_counter_for_trimming = len
+        else:
+            max_tokens_for_trimming = CONTEXT_MAX_TOKENS
+            token_counter_for_trimming = model  # Use the model's token counter
+    else:
+        max_tokens_for_trimming = CONTEXT_MAX_MESSAGES
+        token_counter_for_trimming = len
+
     trimmed_messages = await hass.async_add_executor_job(
         partial(
             trim_messages,
             messages=messages,
-            token_counter=token_counter,
-            max_tokens=max_tokens,
+            token_counter=token_counter_for_trimming,
+            max_tokens=max_tokens_for_trimming,
             strategy="last",
             start_on="human",
             include_system=True,

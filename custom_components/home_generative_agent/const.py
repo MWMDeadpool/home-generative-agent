@@ -123,7 +123,7 @@ VLM_IMAGE_HEIGHT = 1080
 
 ### Ollama summarization model parameters. ###
 # Model server URL.
-SUMMARIZATION_MODEL_URL = "192.168.1.252:11434"
+SUMMARIZATION_MODEL_URL = "192.168.10.2:11434"
 # Maximum number of tokens to predict when generating text.
 SUMMARIZATION_MODEL_PREDICT = 4096
 # Sets the size of the context window used to generate the next token.
