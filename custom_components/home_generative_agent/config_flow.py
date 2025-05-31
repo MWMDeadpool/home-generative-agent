@@ -12,6 +12,7 @@ from homeassistant.config_entries import (
     ConfigFlowResult,
     OptionsFlow,
 )
+from homeassistant.components import conversation
 from homeassistant.const import (
     CONF_API_KEY,
     CONF_LLM_HASS_API,
@@ -43,6 +44,7 @@ from .const import (
     CONF_SUMMARIZATION_MODEL_TEMPERATURE,
     CONF_SUMMARIZATION_MODEL_TOP_P,
     CONF_VIDEO_ANALYZER_MODE,
+    CONF_DELEGATE_AGENTS,
     CONF_VLM,
     CONF_VLM_TEMPERATURE,
     CONF_VLM_TOP_P,
@@ -83,6 +85,7 @@ RECOMMENDED_OPTIONS = {
     CONF_PROMPT: llm.DEFAULT_INSTRUCTIONS_PROMPT,
     CONF_VIDEO_ANALYZER_MODE: "disable",
 }
+RECOMMENDED_OPTIONS[CONF_DELEGATE_AGENTS] = []
 
 async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
     """
@@ -166,7 +169,8 @@ class HomeGenerativeAgentOptionsFlow(OptionsFlow):
                 CONF_RECOMMENDED: user_input[CONF_RECOMMENDED],
                 CONF_PROMPT: user_input[CONF_PROMPT],
                 CONF_LLM_HASS_API: user_input[CONF_LLM_HASS_API],
-                CONF_VIDEO_ANALYZER_MODE: user_input[CONF_VIDEO_ANALYZER_MODE]
+                CONF_VIDEO_ANALYZER_MODE: user_input[CONF_VIDEO_ANALYZER_MODE],
+                CONF_DELEGATE_AGENTS: user_input.get(CONF_DELEGATE_AGENTS, []),
             }
 
         schema = config_option_schema(self.hass, options)
@@ -215,6 +219,35 @@ def config_option_schema(
         )
     ]
 
+    # Domain for the "Extended OpenAI Conversation" integration
+    # Adjust this if the actual domain is different (e.g., "openai_conversation")
+    EXTENDED_OPENAI_DOMAIN = "extended_openai_conversation" # Or "openai_conversation"
+
+    # Start with standard conversation entities
+    available_agents: list[SelectOptionDict] = [
+        SelectOptionDict(
+            label=state.attributes.get("friendly_name", state.entity_id),
+            value=state.entity_id,
+        )
+        for state in hass.states.async_all(conversation.DOMAIN)
+        # Exclude HGA itself if it's already a conversation entity
+        # This check might be more robust if HGA's entity_id is known here
+        if not state.entity_id.startswith(f"conversation.{DOMAIN}") # Basic check
+    ]
+    added_agent_ids = {agent["value"] for agent in available_agents}
+
+    # Add configured instances of "Extended OpenAI Conversation"
+    for entry in hass.config_entries.async_entries(EXTENDED_OPENAI_DOMAIN):
+        if entry.entry_id not in added_agent_ids:
+            available_agents.append(
+                SelectOptionDict(
+                    label=f"{entry.title} (Extended OpenAI)", # Use entry title
+                    value=entry.entry_id, # Use the config entry ID
+                )
+            )
+            added_agent_ids.add(entry.entry_id)
+    available_agents.sort(key=lambda x: x["label"])
+
     schema : VolDictType = {
         vol.Optional(
             CONF_PROMPT,
@@ -231,6 +264,11 @@ def config_option_schema(
             description={"suggested_value": options.get(CONF_VIDEO_ANALYZER_MODE)},
             default=RECOMMENDED_VIDEO_ANALYZER_MODE
             ): SelectSelector(SelectSelectorConfig(options=video_analyzer_mode)),
+        vol.Optional(
+            CONF_DELEGATE_AGENTS,
+            description={"suggested_value": options.get(CONF_DELEGATE_AGENTS)},
+            default=[]
+        ): SelectSelector(SelectSelectorConfig(options=available_agents, multiple=True, sort=True)),
         vol.Required(
             CONF_RECOMMENDED,
             description={"suggested_value": options.get(CONF_RECOMMENDED)},

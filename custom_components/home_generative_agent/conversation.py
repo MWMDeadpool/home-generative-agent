@@ -36,6 +36,7 @@ from .const import (
     CONF_EDGE_CHAT_MODEL_TEMPERATURE,
     CONF_EDGE_CHAT_MODEL_TOP_P,
     CONF_PROMPT,
+    CONF_DELEGATE_AGENTS,
     DOMAIN,
     LANGCHAIN_LOGGING_LEVEL,
     RECOMMENDED_CHAT_MODEL,
@@ -51,6 +52,7 @@ from .tools import (
     add_automation,
     get_and_analyze_camera_image,
     get_entity_history,
+    call_conversation_agent,
     upsert_memory,
 )
 
@@ -180,7 +182,7 @@ class HGAConversationEntity(
         options = self.entry.options
         intent_response = intent.IntentResponse(language=user_input.language)
         llm_api: llm.API | None = None
-        tools: list[dict[str, Any]] | None = None
+        tools: list[dict[str, Any]] | None = [] # Initialize as empty list
         user_name: str | None = None
         llm_context = llm.LLMContext(
             platform=DOMAIN,
@@ -191,20 +193,12 @@ class HGAConversationEntity(
             device_id=user_input.device_id,
         )
 
-        # We are only concerned with User or Assistant content from the chat log since
-        # these may be from the local agent when user asks for something that the local
-        # agent can quickly process. These messages need to be included in this agent so
-        # the entire context is visible. LangChain will handle the rest of the message
-        # history so we don't need to stream anything back into the chat log.
         message_history = [
             _convert_content(m) for m in chat_log.content
             if isinstance(m, conversation.UserContent | conversation.AssistantContent)
         ]
-        # The last chat log entry will be the current user request, include it later.
         message_history = message_history[:-1]
 
-        # If new HA agent messages are added to the chat history, include them, else
-        # ignore the older ones since they were already included in the context.
         if (mhlen := len(message_history)) <= self.message_history_len:
             message_history = []
         else:
@@ -232,16 +226,15 @@ class HGAConversationEntity(
                _format_tool(tool, llm_api.custom_serializer) for tool in llm_api.tools
             ]
 
-        # Add langchain tools to the list of HA tools.
         langchain_tools = {
             "get_and_analyze_camera_image": get_and_analyze_camera_image,
             "upsert_memory": upsert_memory,
             "add_automation": add_automation,
             "get_entity_history": get_entity_history,
+            "call_conversation_agent": call_conversation_agent,
         }
         tools.extend(langchain_tools.values())
 
-        # Conversation IDs are ULIDs. Generate a new one if not provided.
         if chat_log.conversation_id is None:
             conversation_id = ulid.ulid_now()
         else:
@@ -264,7 +257,7 @@ class HGAConversationEntity(
                         llm.BASE_PROMPT
                         + options.get(CONF_PROMPT, llm.DEFAULT_INSTRUCTIONS_PROMPT)
                         + f"\nYou are in the {self.tz} timezone."
-                        + TOOL_CALL_ERROR_SYSTEM_MESSAGE if tools else ""
+                        + (TOOL_CALL_ERROR_SYSTEM_MESSAGE if tools else "")
                     ),
                     self.hass,
                 ).async_render(
@@ -289,6 +282,62 @@ class HGAConversationEntity(
 
         if llm_api:
             prompt_parts.append(llm_api.api_prompt)
+
+        # Domain for the "Extended OpenAI Conversation" integration
+        # Adjust this if the actual domain is different
+        EXTENDED_OPENAI_DOMAIN = "extended_openai_conversation" # Or "openai_conversation"
+
+        # Add guidance for selected delegate agents if any are configured
+        selected_delegate_agents = options.get(CONF_DELEGATE_AGENTS, [])
+        if selected_delegate_agents:
+            agent_descriptions = []
+            for agent_id in selected_delegate_agents:
+                # Skip self to prevent recursion, though it shouldn't be selectable.
+                if agent_id == self.entity_id:
+                    continue
+
+                agent_state = hass.states.get(agent_id)
+                friendly_name = None
+                supported_intents = None
+
+                if agent_state:
+                    friendly_name = agent_state.attributes.get("friendly_name", agent_id)
+                    supported_intents = agent_state.attributes.get("supported_intents")
+                else: # Not a standard conversation entity, check if it's an Extended OpenAI entry ID
+                    extended_openai_entry = hass.config_entries.async_get_entry(agent_id)
+                    if extended_openai_entry and extended_openai_entry.domain == EXTENDED_OPENAI_DOMAIN:
+                        friendly_name = extended_openai_entry.title
+                        # Extended OpenAI agents don't typically expose 'supported_intents' via attributes
+                        supported_intents = None
+                    else:
+                        # Could also try llm.async_get_api if other LLM API types are desired
+                        LOGGER.warning("Could not find state or LLM API for delegate agent_id: %s", agent_id)
+                        continue # Skip this agent if not found
+
+                if not friendly_name: # Fallback if still no name
+                    friendly_name = agent_id
+
+                description_parts = [f"- {friendly_name} (agent_id: {agent_id})"]
+
+                # Attempt to get supported_intents for more specific capabilities
+                if supported_intents and isinstance(supported_intents, list) and supported_intents:
+                    intents_str = ", ".join(supported_intents)
+                    description_parts.append(f"  - Potential capabilities (intents): {intents_str}")
+                elif supported_intents: # If it's there but not a list or empty, show as is
+                    description_parts.append(f"  - Capabilities hint: {str(supported_intents)}")
+
+                agent_descriptions.append("\n".join(description_parts))
+
+            if agent_descriptions:
+                available_agents_str = "\n".join(agent_descriptions)
+                agents_guidance = (
+                    "\nYou can delegate tasks to other specialized conversation agents. "
+                    "If the user's query aligns with an agent's likely function (based on its name or listed capabilities/intents), "
+                    "consider using one of the following available agents:\n"
+                    f"{available_agents_str}\n"
+                    "To do this, invoke the 'call_conversation_agent' tool with the inferred 'agent_id' and the 'user_input' for that agent."
+                )
+                prompt_parts.append(agents_guidance)
 
         prompt = "\n".join(prompt_parts)
 
@@ -339,9 +388,7 @@ class HGAConversationEntity(
 
         chat_model_with_tools = chat_model_with_config.bind_tools(tools)
 
-        # A user name of None indicates an automation is being run.
         user_name = "robot" if user_name is None else user_name
-        # Remove special characters since memory namespace labels cannot contain.
         user_name = user_name.translate(str.maketrans("", "", string.punctuation))
         LOGGER.debug("User name: %s", user_name)
 
@@ -361,20 +408,16 @@ class HGAConversationEntity(
             "recursion_limit": 10
         }
 
-        # Compile graph into a LangChain Runnable.
         app = workflow.compile(
             store=self.entry.store,
             checkpointer=self.checkpointer,
             debug=LANGCHAIN_LOGGING_LEVEL=="debug"
         )
 
-        # The input to the agent is the message history combined with
-        # the user request.
         messages: list[HumanMessage | AIMessage] = []
         messages.extend(message_history)
         messages.append(HumanMessage(content=user_input.text))
 
-        # Interact with agent app.
         try:
             response = await app.ainvoke(
                 {"messages": messages},
@@ -408,5 +451,4 @@ class HGAConversationEntity(
         self, hass: HomeAssistant, entry: ConfigEntry
     ) -> None:
         """Handle options update."""
-        # Reload as we update device info + entity name + supported features
         await hass.config_entries.async_reload(entry.entry_id)

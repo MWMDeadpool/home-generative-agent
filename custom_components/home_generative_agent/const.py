@@ -50,6 +50,8 @@ CONF_VIDEO_ANALYZER_MODE = "video_analyzer_mode"
 RECOMMENDED_VIDEO_ANALYZER_MODE: Literal[
     "disable", "notify_on_anomaly", "always_notify"
 ] = "disable"
+# List of conversation agents that HGA can delegate tasks to.
+CONF_DELEGATE_AGENTS = "delegate_agents"
 
 ### langchain logging level ###
 # See https://python.langchain.com/docs/how_to/debugging/

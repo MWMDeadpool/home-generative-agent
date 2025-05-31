@@ -29,6 +29,7 @@ from langchain_core.runnables import RunnableConfig  # noqa: TCH002
 from langchain_core.tools import InjectedToolArg, tool
 from langchain_ollama import ChatOllama  # noqa: TCH002
 from langgraph.prebuilt import InjectedStore  # noqa: TCH002
+from homeassistant.components import conversation # noqa: TCH001
 from langgraph.store.base import BaseStore  # noqa: TCH002
 from voluptuous import MultipleInvalid
 
@@ -635,3 +636,40 @@ async def get_current_device_state( # noqa: D417
         state_dict[name] = state
 
     return state_dict
+
+@tool(parse_docstring=True)
+async def call_conversation_agent( # noqa: D417
+    agent_id: str,
+    user_input: str,
+    *,
+    # Hide these arguments from the model.
+    config: Annotated[RunnableConfig, InjectedToolArg()]
+) -> str:
+    """
+    Call another Home Assistant conversation agent to handle a specific query and get its response.
+    Use this tool when the user's query can be better handled by a specialized agent
+    (e.g., weather queries by a weather agent, complex lookups by a general assistant like Google Assistant).
+    You will be provided with a list of available agents in the system prompt. Choose the most appropriate one.
+
+    Args:
+        agent_id: The entity_id of the conversation agent to call (e.g., "conversation.google_assistant_sdk").
+                  You must infer this from the user's query and the list of available agents.
+        user_input: The text input to send to the other conversation agent.
+                  This should be the relevant part of the user's query.
+    """
+    hass = config["configurable"]["hass"]
+    try:
+        result = await hass.services.async_call(
+            conversation.DOMAIN,
+            conversation.SERVICE_PROCESS,
+            {
+                "agent_id": agent_id,
+                "text": user_input,
+            },
+            blocking=True,
+            return_response=True,
+        )
+        return result.get("response", {}).get("speech", {}).get("plain", {}).get("speech", "No speech response from agent.")
+    except HomeAssistantError as e:
+        LOGGER.error("Error calling conversation agent %s: %s", agent_id, e)
+        return f"Error calling agent {agent_id}: {e}"
