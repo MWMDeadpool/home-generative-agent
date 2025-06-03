@@ -26,12 +26,15 @@ from homeassistant.helpers.httpx_client import get_async_client
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables import ConfigurableField
 from langchain_ollama import ChatOllama, OllamaEmbeddings
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
 from langgraph.store.postgres import AsyncPostgresStore
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
 from .const import (
+    CONF_GEMINI_API_KEY,
+    CONF_CHAT_MODEL_LOCATION, # Already used, ensure it's imported if not
     CONF_SUMMARIZATION_MODEL,
     CONF_SUMMARIZATION_MODEL_TEMPERATURE,
     CONF_SUMMARIZATION_MODEL_TOP_P,
@@ -82,6 +85,7 @@ class HGAData:
     chat_model: ChatOpenAI
     edge_chat_model: ChatOllama
     vision_model: ChatOllama
+    gemini_chat_model: ChatGoogleGenerativeAI | None # Can be None if no API key
     summarization_model: ChatOllama
     pool: AsyncConnectionPool
     store: AsyncPostgresStore
@@ -476,6 +480,29 @@ async def async_setup_entry(hass: HomeAssistant, entry: HGAConfigEntry) -> bool:
         LOGGER.error("Error setting up chat model: %s", err)
         return False
     entry.chat_model = chat_model
+
+    gemini_api_key = entry.data.get(CONF_GEMINI_API_KEY)
+    gemini_chat_model = None
+    if gemini_api_key:
+        gemini_chat_model = ChatGoogleGenerativeAI(
+            google_api_key=gemini_api_key,
+            # model="gemini-pro", # Default model set in conversation.py based on options
+            # http_async_client=get_async_client(hass), # ChatGoogleGenerativeAI handles its own client
+        ).configurable_fields(
+            model=ConfigurableField(id="model"), # Langchain calls it model, not model_name
+            temperature=ConfigurableField(id="temperature"),
+            top_p=ConfigurableField(id="top_p"),
+            # max_output_tokens=ConfigurableField(id="max_output_tokens"), # Gemini uses this
+        )
+        try:
+            # A simple test, like listing models or a quick invoke
+            # For now, we assume constructor + previous validation is sufficient
+            # await gemini_chat_model.ainvoke("test")
+            pass # Validation happened in config_flow
+        except Exception as err: # More specific errors would be better
+            LOGGER.error("Error setting up Gemini chat model: %s", err)
+            # Decide if this should be a fatal error for setup
+    entry.gemini_chat_model = gemini_chat_model
 
     edge_chat_model = ChatOllama(
         model=RECOMMENDED_EDGE_CHAT_MODEL,

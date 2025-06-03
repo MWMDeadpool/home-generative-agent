@@ -24,6 +24,14 @@ CONF_EDGE_CHAT_MODEL = "edge_chat_model"
 RECOMMENDED_EDGE_CHAT_MODEL = "qwen3:8b"
 CONF_EDGE_CHAT_MODEL_TEMPERATURE = "edge_chat_model_temperature"
 RECOMMENDED_EDGE_CHAT_MODEL_TEMPERATURE = 0.6
+### Google Gemini chat model parameters. ###
+CONF_GEMINI_API_KEY = "gemini_api_key"
+CONF_GEMINI_CHAT_MODEL = "gemini_chat_model"
+RECOMMENDED_GEMINI_CHAT_MODEL = "gemini-1.5-flash-latest"
+CONF_GEMINI_CHAT_MODEL_TEMPERATURE = "gemini_chat_model_temperature"
+RECOMMENDED_GEMINI_CHAT_MODEL_TEMPERATURE = 0.7
+CONF_GEMINI_CHAT_MODEL_TOP_P = "gemini_chat_model_top_p"
+RECOMMENDED_GEMINI_CHAT_MODEL_TOP_P = 0.95
 CONF_EDGE_CHAT_MODEL_TOP_P = "edge_chat_model_top_p"
 RECOMMENDED_EDGE_CHAT_MODEL_TOP_P = 0.95
 ### Ollama vision language model (VLM) parameters. ###
@@ -51,7 +59,8 @@ RECOMMENDED_VIDEO_ANALYZER_MODE: Literal[
     "disable", "notify_on_anomaly", "always_notify"
 ] = "disable"
 # List of conversation agents that HGA can delegate tasks to.
-CONF_DELEGATE_AGENTS = "delegate_agents"
+CONF_DELEGATE_AGENTS = "delegate_agents"  # Stores list of agent_ids
+CONF_DELEGATE_AGENT_DESCRIPTIONS = "delegate_agent_descriptions" # Stores dict[agent_id, description]
 
 ### langchain logging level ###
 # See https://python.langchain.com/docs/how_to/debugging/
@@ -59,7 +68,7 @@ LANGCHAIN_LOGGING_LEVEL: Literal["disable", "verbose", "debug"] = "disable"
 
 ### Chat model context-related parameters. ###
 # Sets the size of the context window used to generate the next token.
-CHAT_MODEL_NUM_CTX = 65536
+CHAT_MODEL_NUM_CTX = 12288
 # Sets the maximum number of output tokens to generate.
 CHAT_MODEL_MAX_TOKENS = 2048
 # Next parameters manage chat model context length.
@@ -109,7 +118,7 @@ VLM_URL = "192.168.10.2:11434"
 # Ollama VLM maximum number of output tokens to generate.
 VLM_NUM_PREDICT = 4096
 # Sets the size of the context window used to generate the next token.
-VLM_NUM_CTX = 16384
+VLM_NUM_CTX = 8192
 # Ollama VLM model prompts for vision tasks.
 VLM_SYSTEM_PROMPT = """
 You are a bot that responses with a description of what is visible in a camera image.
@@ -129,7 +138,7 @@ SUMMARIZATION_MODEL_URL = "192.168.10.2:11434"
 # Maximum number of tokens to predict when generating text.
 SUMMARIZATION_MODEL_PREDICT = 4096
 # Sets the size of the context window used to generate the next token.
-SUMMARIZATION_MODEL_CTX = 32768
+SUMMARIZATION_MODEL_CTX = 8192
 # Reasoning delimiters for models that use them in output.
 # These may be model dependent, the defaults work for qwen3.
 SUMMARIZATION_MODEL_REASONING_DELIMITER: dict[str, str] = {
@@ -170,11 +179,11 @@ Keep the description to the point and use no more than 250 characters.
 VIDEO_ANALYZER_PROMPT = """
 Describe what is happening in this video from these frame descriptions:
 """
-VIDEO_ANALYZER_MOBILE_APP = "mobile_app_darians_phone"
+VIDEO_ANALYZER_MOBILE_APP = "mobile_app_darian_s_phone"
 # Time offset units are minutes.
 VIDEO_ANALYZER_TIME_OFFSET = 15
 VIDEO_ANALYZER_SIMILARITY_THRESHOLD = 0.8
-VIDEO_ANALYZER_DELETE_SNAPSHOTS = False
+VIDEO_ANALYZER_DELETE_SNAPSHOTS = True
 VIDEO_ANALYZER_TRIGGER_ON_MOTION = True
 VIDEO_ANALYZER_MOTION_CAMERA_MAP: dict = {}
 

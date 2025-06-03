@@ -14,13 +14,17 @@
     "langchain==0.3.25",
     "langchain-openai==0.3.18",
     "langchain-ollama==0.3.3",
+    "langchain-google-genai==1.0.9",
+    "google-generativeai==0.7.3",
     "langgraph==0.4.7",
     "langgraph-checkpoint-postgres==2.0.21",
     "openai==1.56.1",
     "ollama==0.4.8",
     "psycopg[binary]==3.2.6",
     "psycopg-pool==3.2.6",
-    "transformers==4.51.3"
+    "voluptuous-openapi",
+    "transformers==4.51.3",
+    "pyyaml"
   ],
   "version": "0.2.0"
 }

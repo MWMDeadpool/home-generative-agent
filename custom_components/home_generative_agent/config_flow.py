@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+import yaml
 import voluptuous as vol
 from homeassistant.config_entries import (
     ConfigEntry,
@@ -26,12 +27,19 @@ from homeassistant.helpers.selector import (
     SelectOptionDict,
     SelectSelector,
     SelectSelectorConfig,
+    TextSelector,
+    TextSelectorConfig,
     TemplateSelector,
 )
 from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 
 from .const import (
     CONF_CHAT_MODEL,
+    CONF_GEMINI_API_KEY,
+    CONF_GEMINI_CHAT_MODEL,
+    CONF_GEMINI_CHAT_MODEL_TEMPERATURE,
+    CONF_GEMINI_CHAT_MODEL_TOP_P,
     CONF_CHAT_MODEL_LOCATION,
     CONF_CHAT_MODEL_TEMPERATURE,
     CONF_EDGE_CHAT_MODEL,
@@ -45,6 +53,7 @@ from .const import (
     CONF_SUMMARIZATION_MODEL_TOP_P,
     CONF_VIDEO_ANALYZER_MODE,
     CONF_DELEGATE_AGENTS,
+    CONF_DELEGATE_AGENT_DESCRIPTIONS,
     CONF_VLM,
     CONF_VLM_TEMPERATURE,
     CONF_VLM_TOP_P,
@@ -52,6 +61,9 @@ from .const import (
     RECOMMENDED_CHAT_MODEL,
     RECOMMENDED_CHAT_MODEL_LOCATION,
     RECOMMENDED_CHAT_MODEL_TEMPERATURE,
+    RECOMMENDED_GEMINI_CHAT_MODEL,
+    RECOMMENDED_GEMINI_CHAT_MODEL_TEMPERATURE,
+    RECOMMENDED_GEMINI_CHAT_MODEL_TOP_P,
     RECOMMENDED_EDGE_CHAT_MODEL,
     RECOMMENDED_EDGE_CHAT_MODEL_TEMPERATURE,
     RECOMMENDED_EDGE_CHAT_MODEL_TOP_P,
@@ -76,6 +88,7 @@ LOGGER = logging.getLogger(__name__)
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_API_KEY): str,
+        vol.Optional(CONF_GEMINI_API_KEY): str,
     }
 )
 
@@ -84,23 +97,45 @@ RECOMMENDED_OPTIONS = {
     CONF_LLM_HASS_API: llm.LLM_API_ASSIST,
     CONF_PROMPT: llm.DEFAULT_INSTRUCTIONS_PROMPT,
     CONF_VIDEO_ANALYZER_MODE: "disable",
+    CONF_DELEGATE_AGENTS: [],
+    CONF_DELEGATE_AGENT_DESCRIPTIONS: {},
+    CONF_GEMINI_CHAT_MODEL: RECOMMENDED_GEMINI_CHAT_MODEL,
+    CONF_GEMINI_CHAT_MODEL_TEMPERATURE: RECOMMENDED_GEMINI_CHAT_MODEL_TEMPERATURE,
+    CONF_GEMINI_CHAT_MODEL_TOP_P: RECOMMENDED_GEMINI_CHAT_MODEL_TOP_P,
 }
-RECOMMENDED_OPTIONS[CONF_DELEGATE_AGENTS] = []
 
-async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
+async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> None:
     """
     Validate the user input allows us to connect.
 
     Data has the keys from STEP_USER_DATA_SCHEMA with values provided by the user.
     """
-    client = ChatOpenAI(
-        api_key=data[CONF_API_KEY], async_client=get_async_client(hass)
-    )
-    await hass.async_add_executor_job(client.bind(timeout=10).get_name)
+    openai_api_key = data.get(CONF_API_KEY)
+    if openai_api_key:
+        client_openai = ChatOpenAI(
+            api_key=openai_api_key, async_client=get_async_client(hass)
+        )
+        try:
+            # A simple way to test the API key and connectivity
+            await client_openai.ainvoke("Hi")
+        except Exception as e:
+            LOGGER.error("OpenAI API validation failed: %s", e)
+            raise InvalidAuthError(f"OpenAI API key validation failed. Please check the key and network access. Error: {e}") from e
+
+    gemini_api_key = data.get(CONF_GEMINI_API_KEY)
+    if gemini_api_key:
+        try:
+            client_gemini = ChatGoogleGenerativeAI(
+                model="gemini-pro",  # Use a common model for validation
+                google_api_key=gemini_api_key,
+            )
+            await client_gemini.ainvoke("Hi")
+        except Exception as e:
+            LOGGER.error("Gemini API validation failed: %s", e)
+            raise InvalidAuthError(f"Gemini API key validation failed. Please check the key and network access. Error: {e}") from e
 
 class HomeGenerativeAgentConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Home Generative Agent."""
-
     VERSION = 1
 
     async def async_step_user(
@@ -116,10 +151,10 @@ class HomeGenerativeAgentConfigFlow(ConfigFlow, domain=DOMAIN):
 
         try:
             await validate_input(self.hass, user_input)
-        except CannotConnectError:
-            errors["base"] = "cannot_connect"
-        except InvalidAuthError:
-            errors["base"] = "invalid_auth"
+        except InvalidAuthError as e:
+            errors["base"] = str(e)
+        except CannotConnectError as e: # Assuming CannotConnectError is defined elsewhere or should be generic
+            errors["base"] = str(e) if str(e) else "cannot_connect"
         except Exception:
             LOGGER.exception("Unexpected exception")
             errors["base"] = "unknown"
@@ -158,8 +193,25 @@ class HomeGenerativeAgentOptionsFlow(OptionsFlow):
 
         if user_input is not None:
             if user_input[CONF_RECOMMENDED] == self.last_rendered_recommended:
-                if user_input[CONF_LLM_HASS_API] == "none":
-                    user_input.pop(CONF_LLM_HASS_API)
+                if user_input.get(CONF_LLM_HASS_API) == "none":
+                    user_input.pop(CONF_LLM_HASS_API, None)
+
+                # Parse YAML for descriptions
+                descriptions_yaml = user_input.get(CONF_DELEGATE_AGENT_DESCRIPTIONS, "")
+                parsed_descriptions = {}
+                if isinstance(descriptions_yaml, str) and descriptions_yaml.strip():
+                    try:
+                        loaded_yaml = yaml.safe_load(descriptions_yaml)
+                        if isinstance(loaded_yaml, dict):
+                            parsed_descriptions = loaded_yaml
+                        else:
+                            self._errors["base"] = "delegate_descriptions_not_dict" # Placeholder for actual error handling
+                    except yaml.YAMLError:
+                        self._errors["base"] = "delegate_descriptions_yaml_error" # Placeholder
+                elif isinstance(descriptions_yaml, dict): # Already a dict (e.g. from existing config)
+                    parsed_descriptions = descriptions_yaml
+                user_input[CONF_DELEGATE_AGENT_DESCRIPTIONS] = parsed_descriptions
+
                 return self.async_create_entry(title="", data=user_input)
 
             # Re-render the options again, now with the recommended options shown/hidden
@@ -170,7 +222,8 @@ class HomeGenerativeAgentOptionsFlow(OptionsFlow):
                 CONF_PROMPT: user_input[CONF_PROMPT],
                 CONF_LLM_HASS_API: user_input[CONF_LLM_HASS_API],
                 CONF_VIDEO_ANALYZER_MODE: user_input[CONF_VIDEO_ANALYZER_MODE],
-                CONF_DELEGATE_AGENTS: user_input.get(CONF_DELEGATE_AGENTS, []),
+                CONF_DELEGATE_AGENTS: user_input.get(CONF_DELEGATE_AGENTS, []), # list of IDs
+                CONF_DELEGATE_AGENT_DESCRIPTIONS: user_input.get(CONF_DELEGATE_AGENT_DESCRIPTIONS, {}), # dict
             }
 
         schema = config_option_schema(self.hass, options)
@@ -268,14 +321,18 @@ def config_option_schema(
             CONF_DELEGATE_AGENTS,
             description={"suggested_value": options.get(CONF_DELEGATE_AGENTS)},
             default=[]
-        ): SelectSelector(SelectSelectorConfig(options=available_agents, multiple=True, sort=True)),
+        ): SelectSelector(SelectSelectorConfig(options=available_agents, multiple=True, sort=True, custom_value=False)),
+        vol.Optional(
+            CONF_DELEGATE_AGENT_DESCRIPTIONS,
+            description={"suggested_value": options.get(CONF_DELEGATE_AGENT_DESCRIPTIONS, {})},
+            default={}
+        ): TextSelector(TextSelectorConfig(multiline=True, type="text")),
         vol.Required(
             CONF_RECOMMENDED,
             description={"suggested_value": options.get(CONF_RECOMMENDED)},
             default=options.get(CONF_RECOMMENDED, False)
         ): bool,
     }
-
     if options.get(CONF_RECOMMENDED):
         return schema
 
@@ -287,6 +344,10 @@ def config_option_schema(
         SelectOptionDict(
             label="edge",
             value="edge",
+        ),
+        SelectOptionDict(
+            label="gemini",
+            value="gemini",
         )
     ]
 
@@ -369,6 +430,23 @@ def config_option_schema(
                 description={"suggested_value": options.get(CONF_EMBEDDING_MODEL)},
                 default=RECOMMENDED_EMBEDDING_MODEL,
             ): str,
+            vol.Optional(
+                CONF_GEMINI_CHAT_MODEL,
+                description={"suggested_value": options.get(CONF_GEMINI_CHAT_MODEL)},
+                default=RECOMMENDED_GEMINI_CHAT_MODEL,
+            ): str,
+            vol.Optional(
+                CONF_GEMINI_CHAT_MODEL_TEMPERATURE,
+                description={
+                    "suggested_value": options.get(CONF_GEMINI_CHAT_MODEL_TEMPERATURE)
+                },
+                default=RECOMMENDED_GEMINI_CHAT_MODEL_TEMPERATURE,
+            ): NumberSelector(NumberSelectorConfig(min=0, max=1, step=0.05)),
+            vol.Optional(
+                CONF_GEMINI_CHAT_MODEL_TOP_P,
+                description={"suggested_value": options.get(CONF_GEMINI_CHAT_MODEL_TOP_P)},
+                default=RECOMMENDED_GEMINI_CHAT_MODEL_TOP_P,
+            ): NumberSelector(NumberSelectorConfig(min=0, max=1, step=0.01)),
         }
     )
 

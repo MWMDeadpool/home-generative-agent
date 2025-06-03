@@ -33,10 +33,14 @@ from .const import (
     CONF_CHAT_MODEL_LOCATION,
     CONF_CHAT_MODEL_TEMPERATURE,
     CONF_EDGE_CHAT_MODEL,
+    CONF_GEMINI_CHAT_MODEL,
+    CONF_GEMINI_CHAT_MODEL_TEMPERATURE,
+    CONF_GEMINI_CHAT_MODEL_TOP_P,
     CONF_EDGE_CHAT_MODEL_TEMPERATURE,
     CONF_EDGE_CHAT_MODEL_TOP_P,
     CONF_PROMPT,
     CONF_DELEGATE_AGENTS,
+    CONF_DELEGATE_AGENT_DESCRIPTIONS,
     DOMAIN,
     LANGCHAIN_LOGGING_LEVEL,
     RECOMMENDED_CHAT_MODEL,
@@ -44,6 +48,9 @@ from .const import (
     RECOMMENDED_CHAT_MODEL_TEMPERATURE,
     RECOMMENDED_EDGE_CHAT_MODEL,
     RECOMMENDED_EDGE_CHAT_MODEL_TEMPERATURE,
+    RECOMMENDED_GEMINI_CHAT_MODEL,
+    RECOMMENDED_GEMINI_CHAT_MODEL_TEMPERATURE,
+    RECOMMENDED_GEMINI_CHAT_MODEL_TOP_P,
     RECOMMENDED_EDGE_CHAT_MODEL_TOP_P,
     TOOL_CALL_ERROR_SYSTEM_MESSAGE,
 )
@@ -289,9 +296,11 @@ class HGAConversationEntity(
 
         # Add guidance for selected delegate agents if any are configured
         selected_delegate_agents = options.get(CONF_DELEGATE_AGENTS, [])
+        delegate_agent_descriptions = options.get(CONF_DELEGATE_AGENT_DESCRIPTIONS, {})
         if selected_delegate_agents:
             agent_descriptions = []
             for agent_id in selected_delegate_agents:
+                user_defined_description = delegate_agent_descriptions.get(agent_id, "")
                 # Skip self to prevent recursion, though it shouldn't be selectable.
                 if agent_id == self.entity_id:
                     continue
@@ -317,7 +326,10 @@ class HGAConversationEntity(
                 if not friendly_name: # Fallback if still no name
                     friendly_name = agent_id
 
-                description_parts = [f"- {friendly_name} (agent_id: {agent_id})"]
+                base_description = f"- {friendly_name} (agent_id: {agent_id})"
+                if user_defined_description:
+                    base_description += f" - User notes: {user_defined_description}"
+                description_parts = [base_description]
 
                 # Attempt to get supported_intents for more specific capabilities
                 if supported_intents and isinstance(supported_intents, list) and supported_intents:
@@ -326,10 +338,10 @@ class HGAConversationEntity(
                 elif supported_intents: # If it's there but not a list or empty, show as is
                     description_parts.append(f"  - Capabilities hint: {str(supported_intents)}")
 
-                agent_descriptions.append("\n".join(description_parts))
+                agent_descriptions_for_prompt.append("\n".join(description_parts))
 
-            if agent_descriptions:
-                available_agents_str = "\n".join(agent_descriptions)
+            if agent_descriptions_for_prompt:
+                available_agents_str = "\n".join(agent_descriptions_for_prompt)
                 agents_guidance = (
                     "\nYou can delegate tasks to other specialized conversation agents. "
                     "If the user's query aligns with an agent's likely function (based on its name or listed capabilities/intents), "
@@ -365,6 +377,27 @@ class HGAConversationEntity(
                         "num_predict": CHAT_MODEL_MAX_TOKENS,
                         "num_ctx": CHAT_MODEL_NUM_CTX,
 
+                    }
+                }
+            )
+        elif chat_model_location == "gemini":
+            if not self.entry.gemini_chat_model:
+                # Handle case where Gemini API key might not be set or model failed to init
+                LOGGER.error("Gemini chat model selected but not available. Falling back to default.")
+                # Fallback logic (e.g., to OpenAI or raise error) - for now, let it proceed and potentially fail
+                # This should ideally be caught earlier or have a more robust fallback.
+                # For this example, we'll assume it's available if this path is taken.
+                intent_response.async_set_error(intent.IntentResponseErrorCode.UNKNOWN, "Gemini model not configured.")
+                return conversation.ConversationResult(response=intent_response, conversation_id=conversation_id)
+
+            chat_model = self.entry.gemini_chat_model
+            chat_model_with_config = chat_model.with_config(
+                {"configurable":
+                    {
+                        "model": options.get(CONF_GEMINI_CHAT_MODEL, RECOMMENDED_GEMINI_CHAT_MODEL),
+                        "temperature": options.get(CONF_GEMINI_CHAT_MODEL_TEMPERATURE, RECOMMENDED_GEMINI_CHAT_MODEL_TEMPERATURE),
+                        "top_p": options.get(CONF_GEMINI_CHAT_MODEL_TOP_P, RECOMMENDED_GEMINI_CHAT_MODEL_TOP_P),
+                        # "max_output_tokens": CHAT_MODEL_MAX_TOKENS, # Gemini uses max_output_tokens
                     }
                 }
             )

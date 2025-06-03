@@ -64,7 +64,15 @@ async def _call_model(
     prompt = config["configurable"]["prompt"]
     user_id = config["configurable"]["user_id"]
     hass = config["configurable"]["hass"]
-    current_model_id = model.model_name
+    #current_model_id = model.model_name
+
+    current_model_id = getattr(model, "model_name", None)
+    if current_model_id is None:
+        current_model_id = getattr(model, "model", "unknown_model_id") # Fallback for Ollama or if model_name not found
+
+    # Retrieve most recent or search for most relevant memories for context.
+    # Use semantic search if the last message was from the user.
+
 
     # Retrieve most recent or search for most relevant memories for context.
     # Use semantic search if the last message was from the user.
