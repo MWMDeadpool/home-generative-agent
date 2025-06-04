@@ -196,21 +196,13 @@ class HomeGenerativeAgentOptionsFlow(OptionsFlow):
                 if user_input.get(CONF_LLM_HASS_API) == "none":
                     user_input.pop(CONF_LLM_HASS_API, None)
 
-                # Parse YAML for descriptions
-                descriptions_yaml = user_input.get(CONF_DELEGATE_AGENT_DESCRIPTIONS, "")
-                parsed_descriptions = {}
-                if isinstance(descriptions_yaml, str) and descriptions_yaml.strip():
-                    try:
-                        loaded_yaml = yaml.safe_load(descriptions_yaml)
-                        if isinstance(loaded_yaml, dict):
-                            parsed_descriptions = loaded_yaml
-                        else:
-                            self._errors["base"] = "delegate_descriptions_not_dict" # Placeholder for actual error handling
-                    except yaml.YAMLError:
-                        self._errors["base"] = "delegate_descriptions_yaml_error" # Placeholder
-                elif isinstance(descriptions_yaml, dict): # Already a dict (e.g. from existing config)
-                    parsed_descriptions = descriptions_yaml
-                user_input[CONF_DELEGATE_AGENT_DESCRIPTIONS] = parsed_descriptions
+                # Store descriptions as plain text.
+                # The input from the TextSelector for CONF_DELEGATE_AGENT_DESCRIPTIONS
+                # is taken as a raw string. This changes the data type of this option
+                # from a dictionary to a string.
+                # Downstream code consuming this option will need to be adapted.
+                descriptions_as_plain_text = user_input.get(CONF_DELEGATE_AGENT_DESCRIPTIONS, "")
+                user_input[CONF_DELEGATE_AGENT_DESCRIPTIONS] = descriptions_as_plain_text
 
                 return self.async_create_entry(title="", data=user_input)
 
