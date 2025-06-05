@@ -35,6 +35,7 @@ from langchain_openai import ChatOpenAI
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 from .const import (
+    # GEMINI_SAFETY_THRESHOLDS_MAP, # Removed
     CONF_CHAT_MODEL,
     CONF_GEMINI_API_KEY,
     CONF_GEMINI_CHAT_MODEL,
@@ -57,7 +58,13 @@ from .const import (
     CONF_VLM,
     CONF_VLM_TEMPERATURE,
     CONF_VLM_TOP_P,
+    # CONF_GEMINI_SAFETY_DANGEROUS_CONTENT, # Removed
+    # CONF_GEMINI_SAFETY_HARASSMENT, # Removed
+    # CONF_GEMINI_SAFETY_HATE_SPEECH, # Removed
+    # CONF_GEMINI_SAFETY_SEXUALLY_EXPLICIT, # Removed
+    # RECOMMENDED_GEMINI_SAFETY_SETTINGS, # Removed
     DOMAIN,
+    RECOMMENDED_GEMINI_CHAT_MODEL,
     RECOMMENDED_CHAT_MODEL,
     RECOMMENDED_CHAT_MODEL_LOCATION,
     RECOMMENDED_CHAT_MODEL_TEMPERATURE,
@@ -102,6 +109,10 @@ RECOMMENDED_OPTIONS = {
     CONF_GEMINI_CHAT_MODEL: RECOMMENDED_GEMINI_CHAT_MODEL,
     CONF_GEMINI_CHAT_MODEL_TEMPERATURE: RECOMMENDED_GEMINI_CHAT_MODEL_TEMPERATURE,
     CONF_GEMINI_CHAT_MODEL_TOP_P: RECOMMENDED_GEMINI_CHAT_MODEL_TOP_P,
+    # CONF_GEMINI_SAFETY_HATE_SPEECH: RECOMMENDED_GEMINI_SAFETY_SETTINGS[CONF_GEMINI_SAFETY_HATE_SPEECH], # Removed
+    # CONF_GEMINI_SAFETY_HARASSMENT: RECOMMENDED_GEMINI_SAFETY_SETTINGS[CONF_GEMINI_SAFETY_HARASSMENT], # Removed
+    # CONF_GEMINI_SAFETY_SEXUALLY_EXPLICIT: RECOMMENDED_GEMINI_SAFETY_SETTINGS[CONF_GEMINI_SAFETY_SEXUALLY_EXPLICIT], # Removed
+    # CONF_GEMINI_SAFETY_DANGEROUS_CONTENT: RECOMMENDED_GEMINI_SAFETY_SETTINGS[CONF_GEMINI_SAFETY_DANGEROUS_CONTENT], # Removed
 }
 
 async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> None:
@@ -113,7 +124,7 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> None:
     openai_api_key = data.get(CONF_API_KEY)
     if openai_api_key:
         client_openai = ChatOpenAI(
-            api_key=openai_api_key, async_client=get_async_client(hass)
+            api_key=openai_api_key, http_async_client=get_async_client(hass)
         )
         try:
             # A simple way to test the API key and connectivity
@@ -126,7 +137,7 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> None:
     if gemini_api_key:
         try:
             client_gemini = ChatGoogleGenerativeAI(
-                model="gemini-pro",  # Use a common model for validation
+                model=RECOMMENDED_GEMINI_CHAT_MODEL,  # Use the recommended model for validation
                 google_api_key=gemini_api_key,
             )
             await client_gemini.ainvoke("Hi")
@@ -294,6 +305,14 @@ def config_option_schema(
     available_agents.sort(key=lambda x: x["label"])
 
     schema : VolDictType = {
+        vol.Required(
+            CONF_RECOMMENDED,
+            description={"suggested_value": options.get(CONF_RECOMMENDED)},
+            default=options.get(CONF_RECOMMENDED, False)
+        ): bool, # Moved to be always visible
+    }
+
+    common_options: VolDictType = {
         vol.Optional(
             CONF_PROMPT,
             description={"suggested_value": options.get(CONF_PROMPT)},
@@ -319,12 +338,9 @@ def config_option_schema(
             description={"suggested_value": options.get(CONF_DELEGATE_AGENT_DESCRIPTIONS, {})},
             default={}
         ): TextSelector(TextSelectorConfig(multiline=True, type="text")),
-        vol.Required(
-            CONF_RECOMMENDED,
-            description={"suggested_value": options.get(CONF_RECOMMENDED)},
-            default=options.get(CONF_RECOMMENDED, False)
-        ): bool,
     }
+    schema.update(common_options)
+
     if options.get(CONF_RECOMMENDED):
         return schema
 
@@ -342,6 +358,17 @@ def config_option_schema(
             value="gemini",
         )
     ]
+
+    # gemini_safety_threshold_options: list[SelectOptionDict] = [
+    #     SelectOptionDict(label=key.replace("BLOCK_", "").replace("_", " ").title(), value=key)
+    #     for key in GEMINI_SAFETY_THRESHOLDS_MAP
+    # ]
+    # # Sort them for better UX, perhaps "BLOCK_NONE" first, then by severity
+    # gemini_safety_threshold_options.sort(key=lambda x: (
+    #     0 if x["value"] == "BLOCK_NONE" else
+    #     1 if "LOW" in x["value"] else
+    #     2 if "MEDIUM" in x["value"] else
+    #     3 if "HIGH" in x["value"] else 4))
 
     schema.update(
         {
@@ -439,6 +466,26 @@ def config_option_schema(
                 description={"suggested_value": options.get(CONF_GEMINI_CHAT_MODEL_TOP_P)},
                 default=RECOMMENDED_GEMINI_CHAT_MODEL_TOP_P,
             ): NumberSelector(NumberSelectorConfig(min=0, max=1, step=0.01)),
+            # vol.Optional(
+            #     CONF_GEMINI_SAFETY_HATE_SPEECH,
+            #     description={"suggested_value": options.get(CONF_GEMINI_SAFETY_HATE_SPEECH)},
+            #     default=RECOMMENDED_GEMINI_SAFETY_SETTINGS[CONF_GEMINI_SAFETY_HATE_SPEECH],
+            # ): SelectSelector(SelectSelectorConfig(options=gemini_safety_threshold_options)),
+            # vol.Optional(
+            #     CONF_GEMINI_SAFETY_HARASSMENT,
+            #     description={"suggested_value": options.get(CONF_GEMINI_SAFETY_HARASSMENT)},
+            #     default=RECOMMENDED_GEMINI_SAFETY_SETTINGS[CONF_GEMINI_SAFETY_HARASSMENT],
+            # ): SelectSelector(SelectSelectorConfig(options=gemini_safety_threshold_options)),
+            # vol.Optional(
+            #     CONF_GEMINI_SAFETY_SEXUALLY_EXPLICIT,
+            #     description={"suggested_value": options.get(CONF_GEMINI_SAFETY_SEXUALLY_EXPLICIT)},
+            #     default=RECOMMENDED_GEMINI_SAFETY_SETTINGS[CONF_GEMINI_SAFETY_SEXUALLY_EXPLICIT],
+            # ): SelectSelector(SelectSelectorConfig(options=gemini_safety_threshold_options)),
+            # vol.Optional(
+            #     CONF_GEMINI_SAFETY_DANGEROUS_CONTENT,
+            #     description={"suggested_value": options.get(CONF_GEMINI_SAFETY_DANGEROUS_CONTENT)},
+            #     default=RECOMMENDED_GEMINI_SAFETY_SETTINGS[CONF_GEMINI_SAFETY_DANGEROUS_CONTENT],
+            # ): SelectSelector(SelectSelectorConfig(options=gemini_safety_threshold_options)),
         }
     )
 

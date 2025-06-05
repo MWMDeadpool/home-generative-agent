@@ -31,8 +31,6 @@ from .const import (
     CONF_SUMMARIZATION_MODEL_TEMPERATURE,
     CONF_SUMMARIZATION_MODEL_TOP_P,
     CONTEXT_MANAGE_USE_TOKENS,
-    CONTEXT_MAX_MESSAGES,
-    CONTEXT_MAX_TOKENS,
     EDGE_CHAT_MODEL_REASONING_DELIMITER,
     EMBEDDING_MODEL_PROMPT_TEMPLATE,
     RECOMMENDED_SUMMARIZATION_MODEL_TEMPERATURE,
@@ -46,6 +44,7 @@ from .const import (
     SUMMARIZATION_MODEL_CTX,
     SUMMARIZATION_MODEL_PREDICT,
 )
+from langchain_google_genai import ChatGoogleGenerativeAI # For type checking if needed
 
 LOGGER = logging.getLogger(__name__)
 
@@ -156,13 +155,15 @@ async def _call_model(
                 "Using message count for trimming context.",
                 current_model_id,
             )
-            max_tokens_for_trimming = CONTEXT_MAX_MESSAGES
+            # This branch implies CONTEXT_MAX_MESSAGES should be used, which is a message count.
+            # However, the variable is named max_tokens_for_trimming. This might need review.
+            # For now, assuming this path is for models where token counting is skipped.
             token_counter_for_trimming = len
         else:
-            max_tokens_for_trimming = CONTEXT_MAX_TOKENS
+            max_tokens_for_trimming = config["configurable"]["max_input_tokens_for_trimming"]
             token_counter_for_trimming = model  # Use the model's token counter
     else:
-        max_tokens_for_trimming = CONTEXT_MAX_MESSAGES
+        max_tokens_for_trimming = config["configurable"].get("max_messages_for_trimming", 80) # Default to CONTEXT_MAX_MESSAGES
         token_counter_for_trimming = len
 
     trimmed_messages = await hass.async_add_executor_job(

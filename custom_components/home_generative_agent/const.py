@@ -1,5 +1,6 @@
 """Constants for Home Generative Agent."""
 
+# from google.genai.types import HarmCategory, HarmBlockThreshold # Removed
 from typing import Literal
 
 DOMAIN = "home_generative_agent"
@@ -27,11 +28,34 @@ RECOMMENDED_EDGE_CHAT_MODEL_TEMPERATURE = 0.6
 ### Google Gemini chat model parameters. ###
 CONF_GEMINI_API_KEY = "gemini_api_key"
 CONF_GEMINI_CHAT_MODEL = "gemini_chat_model"
-RECOMMENDED_GEMINI_CHAT_MODEL = "gemini-1.5-flash-latest"
+RECOMMENDED_GEMINI_CHAT_MODEL = "gemini-2.0-flash-latest"
 CONF_GEMINI_CHAT_MODEL_TEMPERATURE = "gemini_chat_model_temperature"
 RECOMMENDED_GEMINI_CHAT_MODEL_TEMPERATURE = 0.7
 CONF_GEMINI_CHAT_MODEL_TOP_P = "gemini_chat_model_top_p"
 RECOMMENDED_GEMINI_CHAT_MODEL_TOP_P = 0.95
+
+# # Gemini Safety Settings - Removed
+# CONF_GEMINI_SAFETY_HATE_SPEECH = "gemini_safety_hate_speech"
+# CONF_GEMINI_SAFETY_HARASSMENT = "gemini_safety_harassment"
+# CONF_GEMINI_SAFETY_SEXUALLY_EXPLICIT = "gemini_safety_sexually_explicit"
+# CONF_GEMINI_SAFETY_DANGEROUS_CONTENT = "gemini_safety_dangerous_content"
+
+# GEMINI_SAFETY_THRESHOLDS_MAP = {
+#     "BLOCK_NONE": HarmBlockThreshold.BLOCK_NONE,
+#     "BLOCK_ONLY_HIGH": HarmBlockThreshold.BLOCK_ONLY_HIGH,
+#     "BLOCK_MEDIUM_AND_ABOVE": HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+#     "BLOCK_LOW_AND_ABOVE": HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
+#     "HARM_BLOCK_THRESHOLD_UNSPECIFIED": HarmBlockThreshold.HARM_BLOCK_THRESHOLD_UNSPECIFIED,
+# }
+
+# RECOMMENDED_GEMINI_SAFETY_SETTINGS = {
+#     CONF_GEMINI_SAFETY_HATE_SPEECH: "BLOCK_MEDIUM_AND_ABOVE",
+#     CONF_GEMINI_SAFETY_HARASSMENT: "BLOCK_MEDIUM_AND_ABOVE",
+#     CONF_GEMINI_SAFETY_SEXUALLY_EXPLICIT: "BLOCK_MEDIUM_AND_ABOVE",
+#     CONF_GEMINI_SAFETY_DANGEROUS_CONTENT: "BLOCK_MEDIUM_AND_ABOVE",
+# }
+
+
 CONF_EDGE_CHAT_MODEL_TOP_P = "edge_chat_model_top_p"
 RECOMMENDED_EDGE_CHAT_MODEL_TOP_P = 0.95
 ### Ollama vision language model (VLM) parameters. ###
@@ -69,28 +93,37 @@ LANGCHAIN_LOGGING_LEVEL: Literal["disable", "verbose", "debug"] = "disable"
 ### Chat model context-related parameters. ###
 # Sets the size of the context window used to generate the next token.
 CHAT_MODEL_NUM_CTX = 12288
-# Sets the maximum number of output tokens to generate.
+# Sets the maximum number of output tokens to generate (generic for most models).
 CHAT_MODEL_MAX_TOKENS = 2048
+
+# Context window sizes for different models (total tokens).
+# These are illustrative; actual values depend on the specific model version.
+OLLAMA_DEFAULT_MODEL_CTX = 12288 # Example for a typical Ollama model like qwen
+GEMINI_1_5_FLASH_CTX = 1048576
+GEMINI_PRO_CTX = 32768 # (30720 input + 2048 output)
+OPENAI_GPT4_O_MINI_CTX = 128000 # gpt-4o-mini
+OPENAI_GPT4_TURBO_CTX = 128000
+OPENAI_GPT3_5_TURBO_16K_CTX = 16385
+OPENAI_DEFAULT_CTX = 4096 # Fallback or for models like gpt-3.5-turbo (4k version)
+
+# Fudge factor for Ollama token counting issues (tool schemas, undercounting)
+OLLAMA_TOKEN_COUNT_FUDGE_FACTOR = 2048 + 4096
+
 # Next parameters manage chat model context length.
 # CONTEXT_MANAGE_USE_TOKENS = True manages chat model context size via token
 # counting, if False management is done via message counting.
 CONTEXT_MANAGE_USE_TOKENS = True
 # CONTEXT_MAX_MESSAGES is messages to keep in context before deletion.
-# Keep number of tokens below 30k otherwise rate limits may be triggered by OpenAI
-# (Tokens Per Minute limit for Tier 1 pricing is 30k tokens/minute), or Ollama model
-# context length limits will be reached.
-# Assume worse case message is 300 tokens -> 85 messages in context are ~25k tokens,
-# which is consistent with CONTEXT_MAX_TOKENS.
 CONTEXT_MAX_MESSAGES = 80
-# CONTEXT_MAX_TOKENS sets the limit on how large the context can grow. This needs to
-# take into account the output tokens.
-#
-# Reduce by 2k tokens because the token counter ignores tool schemas.
-# Reduce by another 4k because the token counter under counts by as much as 4k tokens.
-# These offsets are for the qwen models and were empirically determined.
-# TODO: fix the token counter to get an accurate count.
-#
-CONTEXT_MAX_TOKENS = (CHAT_MODEL_NUM_CTX - CHAT_MODEL_MAX_TOKENS - 2048 - 4096) # 57344
+# CONTEXT_MAX_INPUT_TOKENS (calculated in conversation.py) sets the limit on how
+# large the input context can grow for the `trim_messages` function.
+# This is derived from the model's total context window minus output tokens and any fudge factors.
+
+# Old constant, will be replaced by model-specific calculations.
+# For reference, this was: (OLLAMA_DEFAULT_MODEL_CTX - CHAT_MODEL_MAX_TOKENS - OLLAMA_TOKEN_COUNT_FUDGE_FACTOR)
+# which is 12288 - 2048 - (2048 + 4096) = 4096
+# We'll use this value as a default for Ollama/OpenAI if specific model context isn't identified.
+DEFAULT_MAX_INPUT_TOKENS_FOR_TRIMMING = 4096
 
 ### Chat model tool error handling parameters. ###
 TOOL_CALL_ERROR_SYSTEM_MESSAGE = """

@@ -34,7 +34,7 @@ from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
 from .const import (
     CONF_GEMINI_API_KEY,
-    CONF_CHAT_MODEL_LOCATION, # Already used, ensure it's imported if not
+    CONF_CHAT_MODEL_LOCATION,
     CONF_SUMMARIZATION_MODEL,
     CONF_SUMMARIZATION_MODEL_TEMPERATURE,
     CONF_SUMMARIZATION_MODEL_TOP_P,
@@ -45,6 +45,7 @@ from .const import (
     EMBEDDING_MODEL_DIMS,
     EMBEDDING_MODEL_URL,
     RECOMMENDED_EDGE_CHAT_MODEL,
+    RECOMMENDED_GEMINI_CHAT_MODEL,
     RECOMMENDED_EMBEDDING_MODEL,
     RECOMMENDED_SUMMARIZATION_MODEL,
     RECOMMENDED_SUMMARIZATION_MODEL_TEMPERATURE,
@@ -504,13 +505,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: HGAConfigEntry) -> bool:
     if gemini_api_key:
         gemini_chat_model = ChatGoogleGenerativeAI(
             google_api_key=gemini_api_key,
-            # model="gemini-pro", # Default model set in conversation.py based on options
+            model=RECOMMENDED_GEMINI_CHAT_MODEL, # Provide a default model for initialization
             # http_async_client=get_async_client(hass), # ChatGoogleGenerativeAI handles its own client
         ).configurable_fields(
             model=ConfigurableField(id="model"), # Langchain calls it model, not model_name
             temperature=ConfigurableField(id="temperature"),
             top_p=ConfigurableField(id="top_p"),
             # max_output_tokens=ConfigurableField(id="max_output_tokens"), # Gemini uses this
+            # safety_settings=ConfigurableField(id="safety_settings"), # Removing safety settings for now
         )
         try:
             # A simple test, like listing models or a quick invoke

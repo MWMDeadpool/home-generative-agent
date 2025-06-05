@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import string
 from typing import TYPE_CHECKING, Any, Literal
+import yaml
 
 import homeassistant.util.dt as dt_util
 from homeassistant.components import assist_pipeline, conversation
@@ -21,6 +22,7 @@ from langchain_core.caches import InMemoryCache
 from langchain_core.globals import set_llm_cache
 from langchain_core.messages import (
     AIMessage,
+    BaseMessage,
     HumanMessage,
 )
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
@@ -28,7 +30,8 @@ from voluptuous_openapi import convert
 
 from .const import (
     CHAT_MODEL_MAX_TOKENS,
-    CHAT_MODEL_NUM_CTX,
+    # GEMINI_SAFETY_THRESHOLDS_MAP, # Removed
+    # HarmCategory, # Removed
     CONF_CHAT_MODEL,
     CONF_CHAT_MODEL_LOCATION,
     CONF_CHAT_MODEL_TEMPERATURE,
@@ -39,17 +42,31 @@ from .const import (
     CONF_EDGE_CHAT_MODEL_TEMPERATURE,
     CONF_EDGE_CHAT_MODEL_TOP_P,
     CONF_PROMPT,
+    # CONF_GEMINI_SAFETY_DANGEROUS_CONTENT, # Removed
+    # CONF_GEMINI_SAFETY_HARASSMENT, # Removed
+    # CONF_GEMINI_SAFETY_HATE_SPEECH, # Removed
+    # CONF_GEMINI_SAFETY_SEXUALLY_EXPLICIT, # Removed
+    # RECOMMENDED_GEMINI_SAFETY_SETTINGS, # Removed
     CONF_DELEGATE_AGENTS,
     CONF_DELEGATE_AGENT_DESCRIPTIONS,
     DOMAIN,
     LANGCHAIN_LOGGING_LEVEL,
+    DEFAULT_MAX_INPUT_TOKENS_FOR_TRIMMING,
+    OLLAMA_DEFAULT_MODEL_CTX,
+    OLLAMA_TOKEN_COUNT_FUDGE_FACTOR,
+    GEMINI_1_5_FLASH_CTX,
+    GEMINI_PRO_CTX,
+    OPENAI_GPT4_O_MINI_CTX, # Assuming gpt-4.1-mini maps to gpt-4o-mini
+    OPENAI_GPT4_TURBO_CTX,
+    OPENAI_DEFAULT_CTX,
     RECOMMENDED_CHAT_MODEL,
     RECOMMENDED_CHAT_MODEL_LOCATION,
     RECOMMENDED_CHAT_MODEL_TEMPERATURE,
     RECOMMENDED_EDGE_CHAT_MODEL,
     RECOMMENDED_EDGE_CHAT_MODEL_TEMPERATURE,
-    RECOMMENDED_GEMINI_CHAT_MODEL,
+    RECOMMENDED_GEMINI_CHAT_MODEL, # Keep for model selection
     RECOMMENDED_GEMINI_CHAT_MODEL_TEMPERATURE,
+    # RECOMMENDED_GEMINI_SAFETY_SETTINGS, # Removed
     RECOMMENDED_GEMINI_CHAT_MODEL_TOP_P,
     RECOMMENDED_EDGE_CHAT_MODEL_TOP_P,
     TOOL_CALL_ERROR_SYSTEM_MESSAGE,
@@ -296,14 +313,40 @@ class HGAConversationEntity(
 
         # Add guidance for selected delegate agents if any are configured
         selected_delegate_agents = options.get(CONF_DELEGATE_AGENTS, [])
-        delegate_agent_descriptions = options.get(CONF_DELEGATE_AGENT_DESCRIPTIONS, {})
+        delegate_agent_descriptions_opt = options.get(CONF_DELEGATE_AGENT_DESCRIPTIONS)
+        delegate_agent_descriptions: dict[str, str] = {}
+
+        if isinstance(delegate_agent_descriptions_opt, str):
+            if delegate_agent_descriptions_opt.strip():  # Only parse if not empty string
+                try:
+                    loaded_descriptions = yaml.safe_load(delegate_agent_descriptions_opt)
+                    if isinstance(loaded_descriptions, dict):
+                        delegate_agent_descriptions = loaded_descriptions
+                    else:
+                        LOGGER.warning(
+                            "CONF_DELEGATE_AGENT_DESCRIPTIONS was a string but not a valid YAML dictionary. Content: '%s'. Using empty descriptions.",
+                            delegate_agent_descriptions_opt
+                        )
+                except yaml.YAMLError as e:
+                    LOGGER.error(
+                        "Error parsing CONF_DELEGATE_AGENT_DESCRIPTIONS YAML: %s. Content: '%s'. Using empty descriptions.",
+                        e,
+                        delegate_agent_descriptions_opt
+                    )
+        elif isinstance(delegate_agent_descriptions_opt, dict):
+            delegate_agent_descriptions = delegate_agent_descriptions_opt
+        elif delegate_agent_descriptions_opt is not None: # Not a string, not a dict, but not None
+            LOGGER.warning(
+                "CONF_DELEGATE_AGENT_DESCRIPTIONS has unexpected type: %s. Content: '%s'. Using empty descriptions.",
+                type(delegate_agent_descriptions_opt).__name__,
+                delegate_agent_descriptions_opt
+            )
+        # If delegate_agent_descriptions_opt is None or an empty string, delegate_agent_descriptions remains {}
+
         if selected_delegate_agents:
             agent_descriptions = []
             for agent_id in selected_delegate_agents:
                 user_defined_description = delegate_agent_descriptions.get(agent_id, "")
-                # Skip self to prevent recursion, though it shouldn't be selectable.
-                if agent_id == self.entity_id:
-                    continue
 
                 agent_state = hass.states.get(agent_id)
                 friendly_name = None
@@ -338,10 +381,10 @@ class HGAConversationEntity(
                 elif supported_intents: # If it's there but not a list or empty, show as is
                     description_parts.append(f"  - Capabilities hint: {str(supported_intents)}")
 
-                agent_descriptions_for_prompt.append("\n".join(description_parts))
+                agent_descriptions.append("\n".join(description_parts))
 
-            if agent_descriptions_for_prompt:
-                available_agents_str = "\n".join(agent_descriptions_for_prompt)
+            if agent_descriptions:
+                available_agents_str = "\n".join(agent_descriptions)
                 agents_guidance = (
                     "\nYou can delegate tasks to other specialized conversation agents. "
                     "If the user's query aligns with an agent's likely function (based on its name or listed capabilities/intents), "
@@ -352,6 +395,36 @@ class HGAConversationEntity(
                 prompt_parts.append(agents_guidance)
 
         prompt = "\n".join(prompt_parts)
+
+        # Calculate max_input_tokens_for_trimming based on the selected model
+        calculated_max_input_tokens: int
+        chat_model_location_opt = options.get(
+            CONF_CHAT_MODEL_LOCATION,
+            RECOMMENDED_CHAT_MODEL_LOCATION
+        )
+
+        if chat_model_location_opt == "edge": # Ollama
+            # CHAT_MODEL_NUM_CTX (now OLLAMA_DEFAULT_MODEL_CTX) is total context for Ollama model
+            calculated_max_input_tokens = OLLAMA_DEFAULT_MODEL_CTX - CHAT_MODEL_MAX_TOKENS - OLLAMA_TOKEN_COUNT_FUDGE_FACTOR
+        elif chat_model_location_opt == "gemini":
+            gemini_model_name = options.get(CONF_GEMINI_CHAT_MODEL, RECOMMENDED_GEMINI_CHAT_MODEL).lower()
+            if "gemini-1.5" in gemini_model_name:
+                calculated_max_input_tokens = GEMINI_1_5_FLASH_CTX - CHAT_MODEL_MAX_TOKENS
+            elif "gemini-pro" in gemini_model_name: # Default for older "gemini-pro"
+                calculated_max_input_tokens = GEMINI_PRO_CTX - CHAT_MODEL_MAX_TOKENS
+            else: # Fallback for unknown Gemini model
+                calculated_max_input_tokens = GEMINI_PRO_CTX - CHAT_MODEL_MAX_TOKENS # Use Gemini Pro as fallback
+        else: # OpenAI ("cloud")
+            openai_model_name = options.get(CONF_CHAT_MODEL, RECOMMENDED_CHAT_MODEL).lower()
+            # Assuming "gpt-4.1-mini" is an alias for something like "gpt-4o-mini"
+            if "gpt-4.1-mini" in openai_model_name or "gpt-4o-mini" in openai_model_name:
+                calculated_max_input_tokens = OPENAI_GPT4_O_MINI_CTX - CHAT_MODEL_MAX_TOKENS
+            elif "gpt-4-turbo" in openai_model_name or "gpt-4-" in openai_model_name: # Broader match for gpt-4 variants
+                calculated_max_input_tokens = OPENAI_GPT4_TURBO_CTX - CHAT_MODEL_MAX_TOKENS
+            else: # Fallback for other OpenAI models (e.g., gpt-3.5-turbo 4k)
+                calculated_max_input_tokens = OPENAI_DEFAULT_CTX - CHAT_MODEL_MAX_TOKENS
+
+        calculated_max_input_tokens = max(1000, calculated_max_input_tokens) # Ensure it's a positive reasonable minimum
 
         chat_model_location = options.get(
             CONF_CHAT_MODEL_LOCATION,
@@ -375,7 +448,7 @@ class HGAConversationEntity(
                             RECOMMENDED_EDGE_CHAT_MODEL_TOP_P,
                         ),
                         "num_predict": CHAT_MODEL_MAX_TOKENS,
-                        "num_ctx": CHAT_MODEL_NUM_CTX,
+                        "num_ctx": OLLAMA_DEFAULT_MODEL_CTX, # Use the specific context for Ollama
 
                     }
                 }
@@ -389,6 +462,21 @@ class HGAConversationEntity(
                 # For this example, we'll assume it's available if this path is taken.
                 intent_response.async_set_error(intent.IntentResponseErrorCode.UNKNOWN, "Gemini model not configured.")
                 return conversation.ConversationResult(response=intent_response, conversation_id=conversation_id)
+            
+            # safety_settings_dict = {
+            #     HarmCategory.HARM_CATEGORY_HATE_SPEECH.value: GEMINI_SAFETY_THRESHOLDS_MAP[
+            #             options.get(CONF_GEMINI_SAFETY_HATE_SPEECH, RECOMMENDED_GEMINI_SAFETY_SETTINGS[CONF_GEMINI_SAFETY_HATE_SPEECH])
+            #         ].value,
+            #     HarmCategory.HARM_CATEGORY_HARASSMENT.value: GEMINI_SAFETY_THRESHOLDS_MAP[
+            #             options.get(CONF_GEMINI_SAFETY_HARASSMENT, RECOMMENDED_GEMINI_SAFETY_SETTINGS[CONF_GEMINI_SAFETY_HARASSMENT])
+            #         ].value,
+            #     HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT.value: GEMINI_SAFETY_THRESHOLDS_MAP[
+            #             options.get(CONF_GEMINI_SAFETY_SEXUALLY_EXPLICIT, RECOMMENDED_GEMINI_SAFETY_SETTINGS[CONF_GEMINI_SAFETY_SEXUALLY_EXPLICIT])
+            #         ].value,
+            #     HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT.value: GEMINI_SAFETY_THRESHOLDS_MAP[
+            #             options.get(CONF_GEMINI_SAFETY_DANGEROUS_CONTENT, RECOMMENDED_GEMINI_SAFETY_SETTINGS[CONF_GEMINI_SAFETY_DANGEROUS_CONTENT])
+            #         ].value,
+            # }
 
             chat_model = self.entry.gemini_chat_model
             chat_model_with_config = chat_model.with_config(
@@ -397,7 +485,7 @@ class HGAConversationEntity(
                         "model": options.get(CONF_GEMINI_CHAT_MODEL, RECOMMENDED_GEMINI_CHAT_MODEL),
                         "temperature": options.get(CONF_GEMINI_CHAT_MODEL_TEMPERATURE, RECOMMENDED_GEMINI_CHAT_MODEL_TEMPERATURE),
                         "top_p": options.get(CONF_GEMINI_CHAT_MODEL_TOP_P, RECOMMENDED_GEMINI_CHAT_MODEL_TOP_P),
-                        # "max_output_tokens": CHAT_MODEL_MAX_TOKENS, # Gemini uses max_output_tokens
+                        # "safety_settings": safety_settings_dict, # Safety settings removed
                     }
                 }
             )
@@ -437,6 +525,7 @@ class HGAConversationEntity(
                 "langchain_tools": langchain_tools,
                 "ha_llm_api": llm_api or None,
                 "hass": hass,
+                "max_input_tokens_for_trimming": calculated_max_input_tokens,
             },
             "recursion_limit": 10
         }
