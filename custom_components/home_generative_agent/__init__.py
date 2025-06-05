@@ -54,13 +54,13 @@ from .const import (
     SUMMARIZATION_MODEL_PREDICT,
     SUMMARIZATION_MODEL_REASONING_DELIMITER,
     SUMMARIZATION_MODEL_URL,
-    VIDEO_ANALYZER_DELETE_SNAPSHOTS,
     VIDEO_ANALYZER_MOBILE_APP,
     VIDEO_ANALYZER_MOTION_CAMERA_MAP,
     VIDEO_ANALYZER_PROMPT,
     VIDEO_ANALYZER_SCAN_INTERVAL,
     VIDEO_ANALYZER_SIMILARITY_THRESHOLD,
     VIDEO_ANALYZER_SNAPSHOT_ROOT,
+    VIDEO_ANALYZER_SNAPSHOTS_TO_KEEP,
     VIDEO_ANALYZER_SYSTEM_MESSAGE,
     VIDEO_ANALYZER_TIME_OFFSET,
     VIDEO_ANALYZER_TRIGGER_ON_MOTION,
@@ -107,6 +107,7 @@ class VideoAnalyzer:
         self.camera_snapshots = {}
         self.camera_write_locks = {}
         self.active_motion_cameras = {}
+        self.last_snapshot_time: dict[str, datetime] = {}
 
     async def _send_notification(
             self,
@@ -180,7 +181,7 @@ class VideoAnalyzer:
             self,
             camera_name: str,
             msg: str,
-            img_path_parts: list[str]
+            first_path_parts: tuple[str]
         ) -> bool:
         """Perform anomaly detection on video analysis."""
         # Sematic search of the store with the video analysis as query.
@@ -194,7 +195,7 @@ class VideoAnalyzer:
         # Calculate a "no newer than" time threshold from first snapshot time
         # by delaying it by the time offset.
         # Snapshot names are in the form "snapshot_20250426_002804.jpg".
-        first_str = img_path_parts[-1].replace("snapshot_", "").replace(".jpg", "")
+        first_str = first_path_parts[-1].replace("snapshot_", "").replace(".jpg", "")
         first_dt = dt_util.as_local(datetime.strptime(first_str, "%Y%m%d_%H%M%S"))  # noqa: DTZ007
         no_newer_dt = first_dt - timedelta(minutes=VIDEO_ANALYZER_TIME_OFFSET)
 
@@ -217,7 +218,7 @@ class VideoAnalyzer:
             async with lock:
                 LOGGER.debug("[%s] Done waiting for writes.", camera_id)
 
-        snapshots = self.camera_snapshots.get(camera_id, [])
+        snapshots: list[Path] = self.camera_snapshots.get(camera_id, [])
         if not snapshots:
             return
 
@@ -243,13 +244,15 @@ class VideoAnalyzer:
         msg = await self._generate_summary(frame_descriptions, camera_id)
 
         # Grab first snapshot image path parts.
-        img_path_parts = snapshots[0].parts
+        first_path_parts = snapshots[0].parts
 
-        # First snapshot path to use as a static image in the mobile app notification.
-        notify_img_path = Path("/media/local") / Path(*img_path_parts[-3:])
+        # Use mid snapshot as a static image in the mobile app notification.
+        mid_index = len(snapshots) // 2
+        mid_path_parts = snapshots[mid_index].parts
+        notify_img_path = Path("/media/local") / Path(*mid_path_parts[-3:])
 
         if (mode := options.get(CONF_VIDEO_ANALYZER_MODE)) == "notify_on_anomaly":
-            is_anomaly = await self._is_anomaly(camera_name, msg, img_path_parts)
+            is_anomaly = await self._is_anomaly(camera_name, msg, first_path_parts)
             LOGGER.debug("Is anomaly: %s", is_anomaly)
 
             if is_anomaly:
@@ -262,18 +265,32 @@ class VideoAnalyzer:
         # Store current msg and associated snapshots.
         await self.entry.store.aput(
             namespace=("video_analysis", camera_name),
-            key=img_path_parts[-1], # key is date and time of first snapshot
-            value={"content": msg, "snapshots": [str(s) for s in snapshots]},
+            key=first_path_parts[-1], # key is date and time of first snapshot
+            value={
+                "content": msg, "snapshots": [str(s) for s in snapshots]
+            },
         )
 
-        # Clean-up.
+          # Get a list of snapshot paths sorted by modification time (newest first).
+        folder = Path(VIDEO_ANALYZER_SNAPSHOT_ROOT) / camera_id.replace(".", "_")
+        snapshots_in_folder = await self.hass.async_add_executor_job(
+            lambda: sorted(
+                [f for f in folder.iterdir() if f.is_file()],
+                key=lambda x: x.stat().st_mtime,
+                reverse=True
+            )
+        )
+
+        # Delete snapshots beyond number to keep.
+        for path in snapshots_in_folder[VIDEO_ANALYZER_SNAPSHOTS_TO_KEEP:]:
+            try:
+                await self.hass.async_add_executor_job(path.unlink)
+                LOGGER.debug("Deleted snapshot: %s", path)
+            except OSError:
+                LOGGER.warning("Failed to delete snapshot: %s", path)
+
         self.camera_snapshots[camera_id] = []
-        if VIDEO_ANALYZER_DELETE_SNAPSHOTS:
-            for path in snapshots:
-                try:
-                    path.unlink()
-                except OSError:
-                    LOGGER.warning("Failed to delete snapshot: %s", path)
+        
 
     def _resolve_camera_from_motion(self, motion_entity_id: str) -> str | None:
         """Resolve a camera entity ID from a motion sensor ID."""
@@ -327,12 +344,13 @@ class VideoAnalyzer:
             return None
 
     async def _motion_snapshot_loop(self, camera_id: str) -> None:
-        """Continuously take snapshots while motion is active."""
+        """Take snapshots while motion is active."""
         try:
             while True:
                 now = dt_util.utcnow()
                 await self._take_single_snapshot(camera_id, now)
-                await asyncio.sleep(1)
+                  # Take snapshots no faster than the scan interval.
+                await asyncio.sleep(VIDEO_ANALYZER_SCAN_INTERVAL)
         except asyncio.CancelledError:
             LOGGER.debug("Snapshot loop cancelled for camera: %s", camera_id)
 
@@ -380,7 +398,7 @@ class VideoAnalyzer:
             if state.state == "recording"
         ]
 
-    async def _take_snapshot(self, now: datetime) -> None:
+    async def _take_snapshots_from_recording_cameras(self, now: datetime) -> None:
         """Take snapshots from all recording cameras."""
         snapshot_root_path = Path(VIDEO_ANALYZER_SNAPSHOT_ROOT)
         snapshot_root_path.mkdir(parents=True, exist_ok=True)
@@ -408,7 +426,7 @@ class VideoAnalyzer:
                 LOGGER.debug("[%s] Snapshot saved to %s", camera_id, snapshot_path)
 
     @callback
-    def _handle_camera_state_change(self, event: Event) -> None:
+    def _handle_camera_recording_state_change(self, event: Event) -> None:
         """Handle camera recording state changes to trigger processing."""
         entity_id = event.data.get("entity_id")
         if not entity_id or not entity_id.startswith("camera."):
@@ -431,12 +449,12 @@ class VideoAnalyzer:
         """Start the video analyzer."""
         self.cancel_track = async_track_time_interval(
             self.hass,
-            self._take_snapshot,
+            self._take_snapshots_from_recording_cameras,
             timedelta(seconds=VIDEO_ANALYZER_SCAN_INTERVAL)
         )
         self.cancel_listen = self.hass.bus.async_listen(
             EVENT_STATE_CHANGED,
-            self._handle_camera_state_change
+            self._handle_camera_recording_state_change
         )
         if VIDEO_ANALYZER_TRIGGER_ON_MOTION:
             self.cancel_motion_listen = self.hass.bus.async_listen(

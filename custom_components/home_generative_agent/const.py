@@ -169,7 +169,7 @@ AUTOMATION_TOOL_BLUEPRINT_NAME = "goruck/hga_scene_analysis.yaml"
 
 ### Camera video analyzer. ###
 # Interval units are seconds.
-VIDEO_ANALYZER_SCAN_INTERVAL = 3600
+VIDEO_ANALYZER_SCAN_INTERVAL = 1.5
 # Root must be in allowlist_external_dirs.
 VIDEO_ANALYZER_SNAPSHOT_ROOT = "/media/snapshots"
 VIDEO_ANALYZER_SYSTEM_MESSAGE = """
@@ -185,6 +185,7 @@ VIDEO_ANALYZER_TIME_OFFSET = 15
 VIDEO_ANALYZER_SIMILARITY_THRESHOLD = 0.8
 VIDEO_ANALYZER_DELETE_SNAPSHOTS = True
 VIDEO_ANALYZER_TRIGGER_ON_MOTION = True
+VIDEO_ANALYZER_SNAPSHOTS_TO_KEEP = 15
 VIDEO_ANALYZER_MOTION_CAMERA_MAP: dict = {}
 
 ### postgresql db parameters for checkpointer and memory persistent storage. ###
