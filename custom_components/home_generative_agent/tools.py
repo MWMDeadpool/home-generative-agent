@@ -28,7 +28,6 @@ from langchain_core.messages import (
 from langchain_core.runnables import RunnableConfig  # noqa: TCH002
 from langchain_core.tools import InjectedToolArg, tool
 from langchain_ollama import ChatOllama  # noqa: TCH002
-from langgraph.prebuilt import InjectedStore  # noqa: TCH002
 from homeassistant.components import conversation # noqa: TCH001
 from langgraph.store.base import BaseStore  # noqa: TCH002
 from voluptuous import MultipleInvalid
@@ -182,7 +181,7 @@ async def upsert_memory( # noqa: D417
     memory_id: str = "",
     # Hide these arguments from the model.
     config: Annotated[RunnableConfig, InjectedToolArg()],
-    store: Annotated[BaseStore, InjectedStore()],
+    store: BaseStore,
 ) -> str:
     """
     INSERT or UPDATE a memory in the database.
