@@ -28,7 +28,7 @@ RECOMMENDED_EDGE_CHAT_MODEL_TEMPERATURE = 0.6
 ### Google Gemini chat model parameters. ###
 CONF_GEMINI_API_KEY = "gemini_api_key"
 CONF_GEMINI_CHAT_MODEL = "gemini_chat_model"
-RECOMMENDED_GEMINI_CHAT_MODEL = "gemini-2.0-flash-latest"
+RECOMMENDED_GEMINI_CHAT_MODEL = "gemini-1.5-flash-latest" # Changed to a more stable model for v1beta API
 CONF_GEMINI_CHAT_MODEL_TEMPERATURE = "gemini_chat_model_temperature"
 RECOMMENDED_GEMINI_CHAT_MODEL_TEMPERATURE = 0.7
 CONF_GEMINI_CHAT_MODEL_TOP_P = "gemini_chat_model_top_p"
